@@ -3,6 +3,9 @@ import mysql from 'mysql2/promise'
 import cors from 'cors'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 // Tipo para os dados dos usuários
 type UsuarioType = {
@@ -20,11 +23,11 @@ app.use(cors())
 // Função para criar a conexão com o banco de dados
 const createDbConnection = async () => {
     return await mysql.createConnection({
-        host: process.env.dbhost ? process.env.dbhost : "localhost",
-        user: process.env.dbuser ? process.env.dbuser : "root",
-        password: process.env.dbpassword ? process.env.dbpassword : "",
-        database: process.env.dbname ? process.env.dbname : "banco1022a",
-        port: process.env.dbport ? parseInt(process.env.dbport) : 3306
+        host: process.env.DB_HOST ? process.env.DB_HOST : "localhost",
+        user: process.env.DB_USER ? process.env.DB_USER : "root", 
+        password: process.env.DB_PASSWORD ? process.env.DB_PASSWORD : "", 
+        database: process.env.DB_NAME ? process.env.DB_NAME : "banco1022a", 
+        port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 3306
     })
 }
 
