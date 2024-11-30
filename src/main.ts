@@ -31,15 +31,33 @@ const createDbConnection = async () => {
     })
 }
 
-// Rota para obter os usuários
-app.get("/usuarios", async (req, res) => {
+// Middleware para verificar o token JWT
+const authenticateToken = (req: any, res: any, next: any) => {
+    // Pega o token do cabeçalho Authorization (se houver)
+    const token = req.header('Authorization')?.replace('Bearer ', '')
+
+    if (!token) {
+        return res.status(401).send({ mensagem: "Token não fornecido" })
+    }
+
+    // Verifica o token usando o segredo que foi usado para assinar
+    jwt.verify(token, 'segredo', (err: any, user: any) => {
+        if (err) {
+            return res.status(403).send({ mensagem: "Token inválido" })
+        }
+
+        req.user = user // Passa as informações do usuário para a requisição
+        next() // Chama a próxima função de middleware ou a rota
+    })
+}
+
+// Rota para obter os usuários (somente usuários autenticados)
+app.get("/usuarios", authenticateToken, async (req, res) => {
     try {
         const connection = await createDbConnection()
 
-        // Modificamos a forma de desestruturar o retorno
         const [usuarios] = await connection.query("SELECT * from usuarios")
 
-        // Verificar se existem usuários
         if ((usuarios as UsuarioType[]).length === 0) {
             return res.status(404).send("Nenhum usuário encontrado.")
         }
@@ -112,8 +130,8 @@ app.post("/usuarios/login", async (req, res) => {
     }
 })
 
-// Rota para obter os produtos
-app.get("/produtos", async (req, res) => {
+// Rota para obter os produtos (somente usuários autenticados)
+app.get("/produtos", authenticateToken, async (req, res) => {
     try {
         const connection = await createDbConnection()
         const [result] = await connection.query("SELECT * from produtos")
@@ -125,8 +143,8 @@ app.get("/produtos", async (req, res) => {
     }
 })
 
-// Rota para adicionar um produto
-app.post("/produtos", async (req, res) => {
+// Rota para adicionar um produto (somente usuários autenticados)
+app.post("/produtos", authenticateToken, async (req, res) => {
     try {
         const connection = await createDbConnection()
         const { id, nome, descricao, preco, imagem } = req.body
