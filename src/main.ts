@@ -1,163 +1,195 @@
-import express from 'express'
-import mysql from 'mysql2/promise'
-import cors from 'cors'
-import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
+import express, { Request, Response, NextFunction } from 'express';
+import mysql from 'mysql2/promise';
+import cors from 'cors';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
+import multer from 'multer';
+import fs from 'fs';
+import { body, validationResult } from 'express-validator';
 
 dotenv.config();
 
-// Tipo para os dados dos usuários
-type UsuarioType = {
-    id: number;
-    nome: string;
-    cpf: string;
-    codigoEmpresarial: string;
-    senha: string;
+// Estendendo o tipo Request do Express para adicionar usuarioId
+declare global {
+    namespace Express {
+        interface Request {
+            usuarioId?: string; // Adiciona a propriedade usuarioId ao tipo Request
+        }
+    }
 }
 
-const app = express()
-app.use(express.json())
-app.use(cors())
+// Configuração do multer para upload de arquivos
+const storage = multer.memoryStorage(); // Usando storage na memória para salvar a imagem como binário
+const upload = multer({ storage });
+
+const app = express();
+app.use(express.json());
+app.use(cors());
 
 // Função para criar a conexão com o banco de dados
 const createDbConnection = async () => {
     return await mysql.createConnection({
-        host: process.env.DB_HOST ? process.env.DB_HOST : "localhost",
-        user: process.env.DB_USER ? process.env.DB_USER : "root", 
-        password: process.env.DB_PASSWORD ? process.env.DB_PASSWORD : "", 
-        database: process.env.DB_NAME ? process.env.DB_NAME : "banco1022a", 
-        port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 3306
-    })
+        host: process.env.DB_HOST || 'localhost',
+        user: process.env.DB_USER || 'root',
+        password: process.env.DB_PASSWORD || '',
+        database: process.env.DB_NAME || 'banco1022a',
+        port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 3306,
+    });
+};
+
+// Definir o tipo do payload para o token JWT
+interface JwtPayload {
+    id: string;
 }
 
 // Middleware para verificar o token JWT
-const authenticateToken = (req: any, res: any, next: any) => {
-    // Pega o token do cabeçalho Authorization (se houver)
-    const token = req.header('Authorization')?.replace('Bearer ', '')
-
+const verificarToken = (req: Request, res: Response, next: NextFunction) => {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
     if (!token) {
-        return res.status(401).send({ mensagem: "Token não fornecido" })
+        return res.status(401).send('Acesso negado. Token não fornecido.');
     }
-
-    // Verifica o token usando o segredo que foi usado para assinar
-    jwt.verify(token, 'segredo', (err: any, user: any) => {
-        if (err) {
-            return res.status(403).send({ mensagem: "Token inválido" })
-        }
-
-        req.user = user // Passa as informações do usuário para a requisição
-        next() // Chama a próxima função de middleware ou a rota
-    })
-}
-
-// Rota para obter os usuários (somente usuários autenticados)
-app.get("/usuarios", authenticateToken, async (req, res) => {
     try {
-        const connection = await createDbConnection()
-
-        const [usuarios] = await connection.query("SELECT * from usuarios")
-
-        if ((usuarios as UsuarioType[]).length === 0) {
-            return res.status(404).send("Nenhum usuário encontrado.")
-        }
-
-        await connection.end()
-        res.send(usuarios)
+        const decoded = jwt.verify(token, 'segredo') as JwtPayload;
+        req.usuarioId = decoded.id;  // Agora funciona sem erro
+        next();
     } catch (e) {
-        console.log(e)
-        res.status(500).send("Server ERROR")
+        return res.status(400).send('Token inválido.');
     }
-})
+};
 
-// Rota para cadastro de novo usuário
-app.post("/usuarios/cadastro", async (req, res) => {
-    try {
-        const connection = await createDbConnection()
-        const { nome, cpf, codigoEmpresarial, senha } = req.body
-
-        // Verificar se o código empresarial já existe
-        const [existeCodigo] = await connection.query("SELECT * FROM usuarios WHERE codigoEmpresarial = ?", [codigoEmpresarial])
-
-        if ((existeCodigo as UsuarioType[]).length > 0) {
-            return res.status(400).send("Código empresarial já registrado.")
+// Rota para cadastro de novo usuário com upload de imagem
+app.post('/usuarios/cadastro', 
+    upload.single('imagem'),
+    [
+        body('nome').isString().withMessage('Nome deve ser uma string'),
+        body('cpf').isString().withMessage('CPF deve ser uma string'),
+        body('codigoEmpresarial').isString().withMessage('Código Empresarial deve ser uma string'),
+        body('senha').isLength({ min: 6 }).withMessage('Senha deve ter no mínimo 6 caracteres')
+    ], 
+    async (req: Request, res: Response) => {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
         }
 
-        // Criptografar a senha
-        const senhaHash = bcrypt.hashSync(senha, 10)
+        try {
+            const connection = await createDbConnection();
+            const { nome, cpf, codigoEmpresarial, senha } = req.body;
 
-        // Inserir novo usuário
-        await connection.query("INSERT INTO usuarios (nome, cpf, codigoEmpresarial, senha) VALUES (?, ?, ?, ?)", [nome, cpf, codigoEmpresarial, senhaHash])
+            // Verificar se o código empresarial já existe
+            const [existeCodigo] = await connection.query(
+                'SELECT * FROM usuarios WHERE codigoEmpresarial = ?',
+                [codigoEmpresarial]
+            );
 
-        await connection.end()
-        res.send({ mensagem: "Usuário cadastrado com sucesso!" })
-    } catch (e) {
-        console.log(e)
-        res.status(500).send("Erro ao cadastrar usuário.")
+            if (Array.isArray(existeCodigo) && existeCodigo.length > 0) {
+                return res.status(400).send('Código empresarial já registrado.');
+            }
+
+            // Criptografar a senha
+            const senhaHash = bcrypt.hashSync(senha, 10);
+
+            // Obter o arquivo de imagem como binário
+            const imagem = req.file ? req.file.buffer : null;
+
+            // Inserir novo usuário com a imagem como binário
+            await connection.query(
+                'INSERT INTO usuarios (nome, cpf, codigoEmpresarial, senha, imagem) VALUES (?, ?, ?, ?, ?)',
+                [nome, cpf, codigoEmpresarial, senhaHash, imagem]
+            );
+
+            await connection.end();
+            res.send({ mensagem: 'Usuário cadastrado com sucesso!' });
+        } catch (e) {
+            console.log(e);
+            res.status(500).send('Erro ao cadastrar usuário.');
+        }
     }
-})
+);
 
-// Rota para login de usuário
-app.post("/usuarios/login", async (req, res) => {
+// Rota de login para gerar o token JWT
+app.post('/usuarios/login', async (req: Request, res: Response) => {
     try {
-        const connection = await createDbConnection()
-        const { codigoEmpresarial, senha } = req.body
+        const connection = await createDbConnection();
+        const { codigoEmpresarial, senha } = req.body;
 
         // Buscar usuário pelo código empresarial
-        const [usuarios] = await connection.query("SELECT * FROM usuarios WHERE codigoEmpresarial = ?", [codigoEmpresarial])
+        const [usuarios] = await connection.query(
+            'SELECT * FROM usuarios WHERE codigoEmpresarial = ?',
+            [codigoEmpresarial]
+        );
 
-        // Verificar se o usuário foi encontrado
-        if ((usuarios as UsuarioType[]).length === 0) {
-            return res.status(400).send({ mensagem: "Usuário não encontrado" })
+        if ((usuarios as any[]).length === 0) {
+            return res.status(400).send({ mensagem: 'Usuário não encontrado' });
         }
 
-        const usuario = (usuarios as UsuarioType[])[0]
+        const usuario = (usuarios as any[])[0];
 
         // Verificar a senha
-        const senhaValida = bcrypt.compareSync(senha, usuario.senha)
+        const senhaValida = bcrypt.compareSync(senha, usuario.senha);
         if (!senhaValida) {
-            return res.status(400).send({ mensagem: "Senha incorreta" })
+            return res.status(400).send({ mensagem: 'Senha incorreta' });
         }
 
         // Gerar um token JWT
-        const token = jwt.sign({ id: usuario.codigoEmpresarial }, 'segredo', { expiresIn: '1h' })
+        const token = jwt.sign({ id: usuario.codigoEmpresarial }, 'segredo', {
+            expiresIn: '1h',
+        });
 
-        await connection.end()
-        res.send({ token })
+        await connection.end();
+        res.send({ token });
     } catch (e) {
-        console.log(e)
-        res.status(500).send("Erro ao fazer login")
+        console.log(e);
+        res.status(500).send('Erro ao fazer login');
     }
-})
+});
 
-// Rota para obter os produtos (somente usuários autenticados)
-app.get("/produtos", authenticateToken, async (req, res) => {
+// Rota protegida (exemplo de como usar o middleware de verificação de token)
+app.get('/usuarios/me', verificarToken, async (req: Request, res: Response) => {
     try {
-        const connection = await createDbConnection()
-        const [result] = await connection.query("SELECT * from produtos")
-        await connection.end()
-        res.send(result)
-    } catch (e) {
-        console.log(e)
-        res.status(500).send("Server ERROR")
-    }
-})
+        const connection = await createDbConnection();
+        const [usuarios] = await connection.query(
+            'SELECT * FROM usuarios WHERE codigoEmpresarial = ?',
+            [req.usuarioId]
+        );
 
-// Rota para adicionar um produto (somente usuários autenticados)
-app.post("/produtos", authenticateToken, async (req, res) => {
-    try {
-        const connection = await createDbConnection()
-        const { id, nome, descricao, preco, imagem } = req.body
-        const [result] = await connection.query("INSERT INTO produtos VALUES (?,?,?,?,?)", [id, nome, descricao, preco, imagem])
-        await connection.end()
-        res.send(result)
+        if ((usuarios as any[]).length === 0) {
+            return res.status(400).send('Usuário não encontrado');
+        }
+
+        const usuario = (usuarios as any[])[0];
+        res.send(usuario);
     } catch (e) {
-        console.log(e)
-        res.status(500).send("Erro ao adicionar produto.")
+        console.log(e);
+        res.status(500).send('Erro ao obter dados do usuário.');
     }
-})
+});
+
+// Rota para excluir um usuário
+app.delete('/usuarios/deletar', verificarToken, async (req: Request, res: Response) => {
+    try {
+        const connection = await createDbConnection();
+        
+        // Excluir usuário
+        const [result] = await connection.query(
+            'DELETE FROM usuarios WHERE codigoEmpresarial = ?',
+            [req.usuarioId]
+        );
+        
+        // Verificar se o usuário foi encontrado e excluído
+        if ((result as mysql.ResultSetHeader).affectedRows === 0) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+        
+        res.send({ mensagem: 'Usuário excluído com sucesso!' });
+    } catch (e) {
+        console.log(e);
+        res.status(500).send('Erro ao excluir usuário.');
+    }
+});
 
 // Iniciar o servidor
 app.listen(8000, () => {
-    console.log("Iniciei o servidor")
-})
+    console.log('Servidor iniciado na porta 8000');
+});
