@@ -53,8 +53,11 @@ const verificarToken = (req: Request, res: Response, next: NextFunction) => {
         const decoded = jwt.verify(token, 'segredo') as JwtPayload;
         req.usuarioId = decoded.id;  // Agora funciona sem erro
         next();
-    } catch (e) {
-        return res.status(400).send('Token inválido.');
+    } catch (e: unknown) {
+        // Cast para 'Error' para acessar e.message e e.stack
+        const error = e as Error;
+        console.error('Token inválido:', error.message);
+        res.status(400).send('Token inválido.');
     }
 };
 
@@ -101,8 +104,11 @@ app.post('/usuarios/cadastro',
 
             await connection.end();
             res.send({ mensagem: 'Usuário cadastrado com sucesso!' });
-        } catch (e) {
-            console.log(e);
+        } catch (e: unknown) {
+            // Cast para 'Error' para acessar e.message e e.stack
+            const error = e as Error;
+            console.error('Erro ao cadastrar usuário:', error.message);
+            console.error('Stack Trace:', error.stack);
             res.status(500).send('Erro ao cadastrar usuário.');
         }
     }
@@ -121,7 +127,7 @@ app.post('/usuarios/login', async (req: Request, res: Response) => {
         );
 
         if ((usuarios as any[]).length === 0) {
-            return res.status(400).send({ mensagem: 'Usuário não encontrado' });
+            return res.status(404).json({ mensagem: 'Usuário não encontrado' });
         }
 
         const usuario = (usuarios as any[])[0];
@@ -129,7 +135,7 @@ app.post('/usuarios/login', async (req: Request, res: Response) => {
         // Verificar a senha
         const senhaValida = bcrypt.compareSync(senha, usuario.senha);
         if (!senhaValida) {
-            return res.status(400).send({ mensagem: 'Senha incorreta' });
+            return res.status(400).json({ mensagem: 'Senha incorreta' });
         }
 
         // Gerar um token JWT
@@ -139,8 +145,11 @@ app.post('/usuarios/login', async (req: Request, res: Response) => {
 
         await connection.end();
         res.send({ token });
-    } catch (e) {
-        console.log(e);
+    } catch (e: unknown) {
+        // Cast para 'Error' para acessar e.message e e.stack
+        const error = e as Error;
+        console.error('Erro ao fazer login:', error.message);
+        console.error('Stack Trace:', error.stack);
         res.status(500).send('Erro ao fazer login');
     }
 });
@@ -160,8 +169,11 @@ app.get('/usuarios/me', verificarToken, async (req: Request, res: Response) => {
 
         const usuario = (usuarios as any[])[0];
         res.send(usuario);
-    } catch (e) {
-        console.log(e);
+    } catch (e: unknown) {
+        // Cast para 'Error' para acessar e.message e e.stack
+        const error = e as Error;
+        console.error('Erro ao obter dados do usuário:', error.message);
+        console.error('Stack Trace:', error.stack);
         res.status(500).send('Erro ao obter dados do usuário.');
     }
 });
@@ -183,8 +195,11 @@ app.delete('/usuarios/deletar', verificarToken, async (req: Request, res: Respon
         }
         
         res.send({ mensagem: 'Usuário excluído com sucesso!' });
-    } catch (e) {
-        console.log(e);
+    } catch (e: unknown) {
+        // Cast para 'Error' para acessar e.message e e.stack
+        const error = e as Error;
+        console.error('Erro ao excluir usuário:', error.message);
+        console.error('Stack Trace:', error.stack);
         res.status(500).send('Erro ao excluir usuário.');
     }
 });
