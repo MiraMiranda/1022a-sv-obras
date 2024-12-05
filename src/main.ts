@@ -97,7 +97,7 @@ app.get('/test-db', async (req: Request, res: Response) => {
 
 // Rota para cadastro de novo usuário com upload de imagem
 app.post(
-    '/usuarios/cadastro',
+    '/cadastro',
     upload.single('imagem'),
     [
         body('nome').isString().withMessage('Nome deve ser uma string'),
