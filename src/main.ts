@@ -21,7 +21,19 @@ declare global {
 
 // Configuração do multer para upload de arquivos
 const storage = multer.memoryStorage(); // Usando storage na memória para salvar a imagem como binário
-const upload = multer({ storage });
+
+const upload = multer({
+    storage,
+    fileFilter: (req, file, cb) => {
+        // Validação de arquivo: permitir apenas imagens
+        if (!file.mimetype.startsWith('image/')) {
+            // Criar um erro de forma genérica
+            const error = new Error('Apenas imagens são permitidas!');
+            return cb(error, false); // Passa o erro corretamente
+        }
+        cb(null, true); // Se o arquivo for válido, permite o upload
+    },
+});
 
 const app = express();
 app.use(express.json());
