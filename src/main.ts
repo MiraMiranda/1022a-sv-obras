@@ -24,13 +24,12 @@ const storage = multer.memoryStorage(); // Usando storage na memória para salva
 const upload = multer({
     storage,
     fileFilter: (req, file, cb) => {
-        // Validação de arquivo: permitir apenas imagens
         if (!file.mimetype.startsWith('image/')) {
-            const error = new Error('Apenas imagens são permitidas!') as any;  // Tornando o erro compatível
-            error.code = 'LIMIT_UNEXPECTED_FILE'; // Adicionando código de erro
-            return cb(error, false); // Passa o erro corretamente
+            const error = new Error('Apenas imagens são permitidas!') as any;
+            error.code = 'LIMIT_UNEXPECTED_FILE';
+            return cb(error, false);
         }
-        cb(null, true); // Se o arquivo for válido, permite o upload
+        cb(null, true);
     },
 });
 
@@ -47,37 +46,15 @@ const createDbConnection = async () => {
             password: process.env.DB_PASSWORD || '',
             database: process.env.DB_NAME || 'banco1022a',
             port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 3306,
-            ssl: {
-                ca: fs.readFileSync('./ca.pem'), // Certificado CA baixado do painel do Aiven
-            },
+            ssl: process.env.DB_SSL ? {
+                ca: fs.readFileSync('./ca.pem'), 
+            } : undefined,
         });
         console.log('Conexão ao banco de dados estabelecida.');
         return connection;
     } catch (error: unknown) {
         console.error('Erro ao conectar ao banco:', (error as Error).message);
-        throw error; // Relança o erro para capturá-lo nos endpoints
-    }
-};
-
-// Definir o tipo do payload para o token JWT
-interface JwtPayload {
-    id: string;
-}
-
-// Middleware para verificar o token JWT
-const verificarToken = (req: Request, res: Response, next: NextFunction) => {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-        return res.status(401).send('Acesso negado. Token não fornecido.');
-    }
-    try {
-        const decoded = jwt.verify(token, 'segredo') as JwtPayload;
-        req.usuarioId = decoded.id;
-        next();
-    } catch (e: unknown) {
-        const error = e as Error;
-        console.error('Token inválido:', error.message);
-        res.status(400).send('Token inválido.');
+        throw error;
     }
 };
 
@@ -85,7 +62,7 @@ const verificarToken = (req: Request, res: Response, next: NextFunction) => {
 app.get('/test-db', async (req: Request, res: Response) => {
     try {
         const connection = await createDbConnection();
-        await connection.query('SELECT 1 + 1 AS result'); // Consulta simples
+        await connection.query('SELECT 1 + 1 AS result');
         await connection.end();
         res.status(200).send('Conexão ao banco de dados bem-sucedida!');
     } catch (e: unknown) {
@@ -97,8 +74,8 @@ app.get('/test-db', async (req: Request, res: Response) => {
 
 // Rota para cadastro de novo usuário com upload de imagem
 app.post(
-    '/cadastro',  // Modificado de /usuarios/cadastro para /cadastro
-    upload.single('imagem'),
+    '/cadastro',  // A URL da rota de cadastro
+    upload.single('imagem'),  // Utiliza o multer para fazer o upload de imagem
     [
         body('nome').isString().withMessage('Nome deve ser uma string'),
         body('cpf').isString().withMessage('CPF deve ser uma string'),
