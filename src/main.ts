@@ -47,7 +47,7 @@ const createDbConnection = async () => {
             database: process.env.DB_NAME || 'banco1022a',
             port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 3306,
             ssl: process.env.DB_SSL ? {
-                ca: fs.readFileSync('./ca.pem'), 
+                ca: fs.readFileSync('./ca.pem'),
             } : undefined,
         });
         console.log('Conexão ao banco de dados estabelecida.');
@@ -120,38 +120,56 @@ app.post(
 );
 
 // Rota de login para gerar o token JWT
-app.post('/usuarios/login', async (req: Request, res: Response) => {
-    try {
-        const connection = await createDbConnection();
-        const { codigoEmpresarial, senha } = req.body;
-
-        const [usuarios] = await connection.query(
-            'SELECT * FROM usuarios WHERE codigoEmpresarial = ?',
-            [codigoEmpresarial]
-        );
-
-        if ((usuarios as any[]).length === 0) {
-            return res.status(404).json({ mensagem: 'Usuário não encontrado' });
+app.post(
+    '/usuarios/login',
+    [
+        body('codigoEmpresarial').isString().withMessage('Código Empresarial deve ser uma string'),
+        body('senha').isLength({ min: 6 }).withMessage('Senha deve ter no mínimo 6 caracteres'),
+    ],
+    async (req: Request, res: Response) => {
+        // Validação dos dados de entrada
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
         }
 
-        const usuario = (usuarios as any[])[0];
-        const senhaValida = bcrypt.compareSync(senha, usuario.senha);
-        if (!senhaValida) {
-            return res.status(400).json({ mensagem: 'Senha incorreta' });
+        try {
+            const connection = await createDbConnection();
+            const { codigoEmpresarial, senha } = req.body;
+
+            // Verifica se o usuário existe no banco de dados
+            const [usuarios] = await connection.query(
+                'SELECT * FROM usuarios WHERE codigoEmpresarial = ?',
+                [codigoEmpresarial]
+            );
+
+            if ((usuarios as any[]).length === 0) {
+                return res.status(404).json({ mensagem: 'Usuário não encontrado' });
+            }
+
+            const usuario = (usuarios as any[])[0];
+
+            // Verifica se a senha fornecida é válida
+            const senhaValida = bcrypt.compareSync(senha, usuario.senha);
+            if (!senhaValida) {
+                return res.status(400).json({ mensagem: 'Senha incorreta' });
+            }
+
+            // Gera um token JWT
+            const token = jwt.sign({ id: usuario.codigoEmpresarial }, 'segredo', {
+                expiresIn: '1h',
+            });
+
+            await connection.end();
+
+            res.send({ token });
+        } catch (e: unknown) {
+            const error = e as Error;
+            console.error('Erro ao fazer login:', error.message);
+            res.status(500).send('Erro ao fazer login');
         }
-
-        const token = jwt.sign({ id: usuario.codigoEmpresarial }, 'segredo', {
-            expiresIn: '1h',
-        });
-
-        await connection.end();
-        res.send({ token });
-    } catch (e: unknown) {
-        const error = e as Error;
-        console.error('Erro ao fazer login:', error.message);
-        res.status(500).send('Erro ao fazer login');
     }
-});
+);
 
 // Iniciar o servidor
 app.listen(8000, () => {
