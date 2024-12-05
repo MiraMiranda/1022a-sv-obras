@@ -21,14 +21,13 @@ declare global {
 
 // Configuração do multer para upload de arquivos
 const storage = multer.memoryStorage(); // Usando storage na memória para salvar a imagem como binário
-
 const upload = multer({
     storage,
     fileFilter: (req, file, cb) => {
         // Validação de arquivo: permitir apenas imagens
         if (!file.mimetype.startsWith('image/')) {
-            // Criar um erro de forma genérica
-            const error = new Error('Apenas imagens são permitidas!');
+            const error = new Error('Apenas imagens são permitidas!') as any;  // Tornando o erro compatível
+            error.code = 'LIMIT_UNEXPECTED_FILE'; // Adicionando código de erro
             return cb(error, false); // Passa o erro corretamente
         }
         cb(null, true); // Se o arquivo for válido, permite o upload
