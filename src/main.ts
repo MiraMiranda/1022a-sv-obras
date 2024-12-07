@@ -35,7 +35,24 @@ const upload = multer({
 
 const app = express();
 app.use(express.json());
-app.use(cors());
+
+// Configuração de CORS
+const allowedOrigins = ['http://localhost:5173']; // Adicione aqui os domínios permitidos
+app.use(
+    cors({
+        origin: allowedOrigins,
+        methods: ['GET', 'POST', 'PUT', 'DELETE'], // Métodos permitidos
+        credentials: true, // Permitir envio de cookies e headers de autenticação
+    })
+);
+
+// Middleware para tratar erros de upload com multer
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+    if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+        return res.status(400).send({ error: 'Apenas imagens são permitidas!' });
+    }
+    next(err);
+});
 
 // Função para criar a conexão com o banco de dados
 const createDbConnection = async () => {
@@ -46,9 +63,11 @@ const createDbConnection = async () => {
             password: process.env.DB_PASSWORD || '',
             database: process.env.DB_NAME || 'banco1022a',
             port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 3306,
-            ssl: process.env.DB_SSL ? {
-                ca: fs.readFileSync('./ca.pem'),
-            } : undefined,
+            ssl: process.env.DB_SSL
+                ? {
+                      ca: fs.readFileSync('./ca.pem'),
+                  }
+                : undefined,
         });
         console.log('Conexão ao banco de dados estabelecida.');
         return connection;
@@ -74,8 +93,8 @@ app.get('/test-db', async (req: Request, res: Response) => {
 
 // Rota para cadastro de novo usuário com upload de imagem
 app.post(
-    '/cadastro',  // A URL da rota de cadastro
-    upload.single('imagem'),  // Utiliza o multer para fazer o upload de imagem
+    '/cadastro', // A URL da rota de cadastro
+    upload.single('imagem'), // Utiliza o multer para fazer o upload de imagem
     [
         body('nome').isString().withMessage('Nome deve ser uma string'),
         body('cpf').isString().withMessage('CPF deve ser uma string'),
@@ -127,7 +146,6 @@ app.post(
         body('senha').isLength({ min: 6 }).withMessage('Senha deve ter no mínimo 6 caracteres'),
     ],
     async (req: Request, res: Response) => {
-        // Validação dos dados de entrada
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             return res.status(400).json({ errors: errors.array() });
@@ -137,7 +155,6 @@ app.post(
             const connection = await createDbConnection();
             const { codigoEmpresarial, senha } = req.body;
 
-            // Verifica se o usuário existe no banco de dados
             const [usuarios] = await connection.query(
                 'SELECT * FROM usuarios WHERE codigoEmpresarial = ?',
                 [codigoEmpresarial]
@@ -149,16 +166,16 @@ app.post(
 
             const usuario = (usuarios as any[])[0];
 
-            // Verifica se a senha fornecida é válida
             const senhaValida = bcrypt.compareSync(senha, usuario.senha);
             if (!senhaValida) {
                 return res.status(400).json({ mensagem: 'Senha incorreta' });
             }
 
-            // Gera um token JWT
-            const token = jwt.sign({ id: usuario.codigoEmpresarial }, 'segredo', {
-                expiresIn: '1h',
-            });
+            const token = jwt.sign(
+                { id: usuario.codigoEmpresarial },
+                process.env.JWT_SECRET || 'default_secret',
+                { expiresIn: '1h' }
+            );
 
             await connection.end();
 
