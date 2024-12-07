@@ -20,7 +20,7 @@ declare global {
 }
 
 // Configuração do multer para upload de arquivos
-const storage = multer.memoryStorage(); // Usando storage na memória para salvar a imagem como binário
+const storage = multer.memoryStorage();
 const upload = multer({
     storage,
     fileFilter: (req, file, cb) => {
@@ -37,12 +37,12 @@ const app = express();
 app.use(express.json());
 
 // Configuração de CORS
-const allowedOrigins = ['http://localhost:5173']; // Adicione aqui os domínios permitidos
+const allowedOrigins = ['http://localhost:5173'];
 app.use(
     cors({
         origin: allowedOrigins,
-        methods: ['GET', 'POST', 'PUT', 'DELETE'], // Métodos permitidos
-        credentials: true, // Permitir envio de cookies e headers de autenticação
+        methods: ['GET', 'POST', 'PUT', 'DELETE'],
+        credentials: true,
     })
 );
 
@@ -91,10 +91,29 @@ app.get('/test-db', async (req: Request, res: Response) => {
     }
 });
 
+// Rota para listar todos os produtos
+app.get('/produtos', async (req: Request, res: Response) => {
+    try {
+        const connection = await createDbConnection();
+        const [produtos] = await connection.query('SELECT * FROM produtos');
+        await connection.end();
+
+        if (Array.isArray(produtos) && produtos.length > 0) {
+            res.status(200).json(produtos);
+        } else {
+            res.status(404).json({ mensagem: 'Nenhum produto encontrado.' });
+        }
+    } catch (e: unknown) {
+        const error = e as Error;
+        console.error('Erro ao buscar produtos:', error.message);
+        res.status(500).json({ mensagem: 'Erro ao buscar produtos.' });
+    }
+});
+
 // Rota para cadastro de novo usuário com upload de imagem
 app.post(
-    '/cadastro', // A URL da rota de cadastro
-    upload.single('imagem'), // Utiliza o multer para fazer o upload de imagem
+    '/cadastro',
+    upload.single('imagem'),
     [
         body('nome').isString().withMessage('Nome deve ser uma string'),
         body('cpf').isString().withMessage('CPF deve ser uma string'),
