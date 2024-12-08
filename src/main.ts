@@ -54,6 +54,24 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     next(err);
 });
 
+// Middleware para verificar o token JWT
+const verificarToken = (req: Request, res: Response, next: NextFunction) => {
+    const token = req.headers['authorization']?.split(' ')[1]; // Pega o token do header Authorization
+
+    if (!token) {
+        return res.status(401).json({ mensagem: 'Token não fornecido' });
+    }
+
+    jwt.verify(token, process.env.JWT_SECRET || 'default_secret', (err: any, decoded: any) => {
+        if (err) {
+            return res.status(403).json({ mensagem: 'Token inválido' });
+        }
+
+        req.usuarioId = decoded.id; // Atribui o id do usuário ao request para futuras consultas
+        next();
+    });
+};
+
 // Função para criar a conexão com o banco de dados
 const createDbConnection = async () => {
     try {
@@ -206,6 +224,32 @@ app.post(
         }
     }
 );
+
+// Rota para obter os dados do usuário
+app.get('/usuarios/dados', verificarToken, async (req: Request, res: Response) => {
+    try {
+        const connection = await createDbConnection();
+        const usuarioId = req.usuarioId; // Obtém o id do usuário do token
+
+        const [usuarios] = await connection.query(
+            'SELECT nome, codigoEmpresarial FROM usuarios WHERE codigoEmpresarial = ?',
+            [usuarioId]
+        );
+
+        if ((usuarios as any[]).length === 0) {
+            return res.status(404).json({ mensagem: 'Usuário não encontrado' });
+        }
+
+        const usuario = (usuarios as any[])[0]; // Extrai os dados do usuário
+
+        await connection.end();
+        res.status(200).json(usuario); // Retorna os dados do usuário
+    } catch (error: unknown) {
+        const err = error as Error;
+        console.error('Erro ao carregar dados do usuário:', err.message);
+        res.status(500).json({ mensagem: 'Erro ao carregar dados do usuário' });
+    }
+});
 
 // Iniciar o servidor
 app.listen(8000, () => {
