@@ -128,6 +128,25 @@ app.get('/produtos', async (req: Request, res: Response) => {
     }
 });
 
+// Rota para cadastro de novo produto
+app.post('/produtos', async (req: Request, res: Response) => {
+    const { id, nome, descricao, preco, imagem, estoque } = req.body;
+
+    try {
+        const connection = await createDbConnection();
+        await connection.query(
+            'INSERT INTO produtos (id, nome, descricao, preco, imagem, estoque) VALUES (?, ?, ?, ?, ?, ?)',
+            [id, nome, descricao, preco, imagem, estoque]
+        );
+        await connection.end();
+        res.status(201).send('Produto cadastrado com sucesso!');
+    } catch (e: unknown) {
+        const error = e as Error;
+        console.error('Erro ao cadastrar produto:', error.message);
+        res.status(500).send('Erro ao cadastrar produto');
+    }
+});
+
 // Rota para cadastro de novo usuário com upload de imagem
 app.post(
     '/cadastro',
@@ -240,18 +259,17 @@ app.get('/usuarios/dados', verificarToken, async (req: Request, res: Response) =
             return res.status(404).json({ mensagem: 'Usuário não encontrado' });
         }
 
-        const usuario = (usuarios as any[])[0]; // Extrai os dados do usuário
-
         await connection.end();
-        res.status(200).json(usuario); // Retorna os dados do usuário
-    } catch (error: unknown) {
-        const err = error as Error;
-        console.error('Erro ao carregar dados do usuário:', err.message);
-        res.status(500).json({ mensagem: 'Erro ao carregar dados do usuário' });
+        res.status(200).json((usuarios as any[])[0]);
+    } catch (e: unknown) {
+        const error = e as Error;
+        console.error('Erro ao buscar dados do usuário:', error.message);
+        res.status(500).json({ mensagem: 'Erro ao buscar dados do usuário' });
     }
 });
 
 // Iniciar o servidor
-app.listen(8000, () => {
-    console.log('Servidor iniciado na porta 8000');
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
 });
