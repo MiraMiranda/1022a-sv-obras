@@ -4,6 +4,8 @@ import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
+import multer from 'multer';
+import fs from 'fs';
 import { body, validationResult } from 'express-validator';
 
 dotenv.config();
@@ -17,6 +19,20 @@ declare global {
     }
 }
 
+// Configuração do multer para upload de arquivos
+const storage = multer.memoryStorage();
+const upload = multer({
+    storage,
+    fileFilter: (req, file, cb) => {
+        if (!file.mimetype.startsWith('image/')) {
+            const error = new Error('Apenas imagens são permitidas!') as any;
+            error.code = 'LIMIT_UNEXPECTED_FILE';
+            return cb(error, false);
+        }
+        cb(null, true);
+    },
+});
+
 const app = express();
 app.use(express.json());
 
@@ -29,6 +45,14 @@ app.use(
         credentials: true,
     })
 );
+
+// Middleware para tratar erros de upload com multer
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+    if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+        return res.status(400).send({ error: 'Apenas imagens são permitidas!' });
+    }
+    next(err);
+});
 
 // Middleware para verificar o token JWT
 const verificarToken = (req: Request, res: Response, next: NextFunction) => {
@@ -57,6 +81,11 @@ const createDbConnection = async () => {
             password: process.env.DB_PASSWORD || '',
             database: process.env.DB_NAME || 'banco1022a',
             port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 3306,
+            ssl: process.env.DB_SSL
+                ? {
+                      ca: fs.readFileSync('./ca.pem'),
+                  }
+                : undefined,
         });
         console.log('Conexão ao banco de dados estabelecida.');
         return connection;
@@ -65,6 +94,20 @@ const createDbConnection = async () => {
         throw error;
     }
 };
+
+// Rota para testar a conexão com o banco de dados
+app.get('/test-db', async (req: Request, res: Response) => {
+    try {
+        const connection = await createDbConnection();
+        await connection.query('SELECT 1 + 1 AS result');
+        await connection.end();
+        res.status(200).send('Conexão ao banco de dados bem-sucedida!');
+    } catch (e: unknown) {
+        const error = e as Error;
+        console.error('Erro ao conectar ao banco:', error.message);
+        res.status(500).send('Erro ao conectar ao banco de dados.');
+    }
+});
 
 // Rota para listar todos os produtos
 app.get('/produtos', async (req: Request, res: Response) => {
@@ -125,6 +168,130 @@ app.post(
         }
     }
 );
+
+
+// Rota para cadastro de novo usuário com upload de imagem
+app.post(
+    '/cadastro',
+    upload.single('imagem'),
+    [
+        body('nome').isString().withMessage('Nome deve ser uma string'),
+        body('cpf').isString().withMessage('CPF deve ser uma string'),
+        body('codigoEmpresarial').isString().withMessage('Código Empresarial deve ser uma string'),
+        body('senha').isLength({ min: 6 }).withMessage('Senha deve ter no mínimo 6 caracteres'),
+    ],
+    async (req: Request, res: Response) => {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
+        try {
+            const connection = await createDbConnection();
+            const { nome, cpf, codigoEmpresarial, senha } = req.body;
+
+            const [existeCodigo] = await connection.query(
+                'SELECT * FROM usuarios WHERE codigoEmpresarial = ?',
+                [codigoEmpresarial]
+            );
+
+            if (Array.isArray(existeCodigo) && existeCodigo.length > 0) {
+                return res.status(400).send('Código empresarial já registrado.');
+            }
+
+            const senhaHash = bcrypt.hashSync(senha, 10);
+            const imagem = req.file ? req.file.buffer : null;
+
+            await connection.query(
+                'INSERT INTO usuarios (nome, cpf, codigoEmpresarial, senha, imagem) VALUES (?, ?, ?, ?, ?)',
+                [nome, cpf, codigoEmpresarial, senhaHash, imagem]
+            );
+
+            await connection.end();
+            res.send({ mensagem: 'Usuário cadastrado com sucesso!' });
+        } catch (e: unknown) {
+            const error = e as Error;
+            console.error('Erro ao cadastrar usuário:', error.message);
+            res.status(500).send('Erro ao cadastrar usuário.');
+        }
+    }
+);
+
+// Rota de login para gerar o token JWT
+app.post(
+    '/usuarios/login',
+    [
+        body('codigoEmpresarial').isString().withMessage('Código Empresarial deve ser uma string'),
+        body('senha').isLength({ min: 6 }).withMessage('Senha deve ter no mínimo 6 caracteres'),
+    ],
+    async (req: Request, res: Response) => {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
+        try {
+            const connection = await createDbConnection();
+            const { codigoEmpresarial, senha } = req.body;
+
+            const [usuarios] = await connection.query(
+                'SELECT * FROM usuarios WHERE codigoEmpresarial = ?',
+                [codigoEmpresarial]
+            );
+
+            if ((usuarios as any[]).length === 0) {
+                return res.status(404).json({ mensagem: 'Usuário não encontrado' });
+            }
+
+            const usuario = (usuarios as any[])[0];
+
+            const senhaValida = bcrypt.compareSync(senha, usuario.senha);
+            if (!senhaValida) {
+                return res.status(400).json({ mensagem: 'Senha incorreta' });
+            }
+
+            const token = jwt.sign(
+                { id: usuario.codigoEmpresarial },
+                process.env.JWT_SECRET || 'default_secret',
+                { expiresIn: '1h' }
+            );
+
+            await connection.end();
+
+            res.send({ token });
+        } catch (e: unknown) {
+            const error = e as Error;
+            console.error('Erro ao fazer login:', error.message);
+            res.status(500).send('Erro ao fazer login');
+        }
+    }
+);
+
+// Rota para obter os dados do usuário
+app.get('/usuarios/dados', verificarToken, async (req: Request, res: Response) => {
+    try {
+        const connection = await createDbConnection();
+        const usuarioId = req.usuarioId; // Obtém o id do usuário do token
+
+        const [usuarios] = await connection.query(
+            'SELECT nome, codigoEmpresarial FROM usuarios WHERE codigoEmpresarial = ?',
+            [usuarioId]
+        );
+
+        if ((usuarios as any[]).length === 0) {
+            return res.status(404).json({ mensagem: 'Usuário não encontrado' });
+        }
+
+        const usuario = (usuarios as any[])[0]; // Extrai os dados do usuário
+
+        await connection.end();
+        res.status(200).json(usuario); // Retorna os dados do usuário
+    } catch (error: unknown) {
+        const err = error as Error;
+        console.error('Erro ao carregar dados do usuário:', err.message);
+        res.status(500).json({ mensagem: 'Erro ao carregar dados do usuário' });
+    }
+});
 
 // Iniciar o servidor
 app.listen(8000, () => {
