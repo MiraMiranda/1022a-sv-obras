@@ -37,7 +37,7 @@ const app = express();
 app.use(express.json());
 
 // Configuração de CORS
-const allowedOrigins = ['http://localhost:5173'];
+const allowedOrigins = ['https://one022a-marketplace-9o8f.onrender.com'];
 app.use(
     cors({
         origin: allowedOrigins,
