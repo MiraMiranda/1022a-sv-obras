@@ -39,11 +39,12 @@ app.use(express.json());
 // Configuração de CORS
 const allowedOrigins = ['https://one022a-marketplace-9o8f.onrender.com'];
 app.use(
-    cors({
-        origin: allowedOrigins,
-        methods: ['GET', 'POST', 'PUT', 'DELETE'],
-        credentials: true,
-    })
+    cors()
+    // cors({
+    //     origin: allowedOrigins,
+    //     methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    //     credentials: true,
+    // })
 );
 
 // Middleware para tratar erros de upload com multer
