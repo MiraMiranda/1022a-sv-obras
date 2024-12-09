@@ -128,50 +128,42 @@ app.get('/produtos', async (req: Request, res: Response) => {
     }
 });
 
-// Rota para cadastro de novo produto
+// Rota para cadastro de produtos
 app.post(
     '/produtos',
+    verificarToken, // Middleware para verificar se o usuário está autenticado
+    upload.single('imagem'), // Middleware para permitir upload de uma imagem associada ao produto
     [
-        body('id').notEmpty().withMessage('O campo ID é obrigatório'),
-        body('nome').isString().withMessage('O nome deve ser uma string'),
-        body('descricao').isString().withMessage('A descrição deve ser uma string'),
-        body('preco').isNumeric().withMessage('O preço deve ser um número'),
-        body('imagem').isString().withMessage('O campo imagem deve ser uma string'),
-        body('estoque').isNumeric().withMessage('O estoque deve ser um número'),
+        // Validações de entrada usando express-validator
+        body('nome').isString().withMessage('Nome do produto deve ser uma string'),
+        body('descricao').isString().withMessage('Descrição do produto deve ser uma string'),
+        body('preco').isFloat({ gt: 0 }).withMessage('Preço deve ser um número maior que zero'),
+        body('estoque').isInt({ gt: -1 }).withMessage('Estoque deve ser um número inteiro maior ou igual a zero'),
     ],
     async (req: Request, res: Response) => {
+        // Checa se há erros de validação
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             return res.status(400).json({ errors: errors.array() });
         }
 
-        const { id, nome, descricao, preco, imagem, estoque } = req.body;
-
         try {
-            const connection = await createDbConnection();
+            const connection = await createDbConnection(); // Conexão com o banco de dados
+            const { nome, descricao, preco, estoque } = req.body; // Dados do produto recebidos
+            const imagem = req.file ? req.file.buffer : null; // Upload da imagem (opcional)
 
-            // Verifica se o produto já existe pelo ID
-            const [produtoExistente] = await connection.query(
-                'SELECT * FROM produtos WHERE id = ?',
-                [id]
-            );
-
-            if (Array.isArray(produtoExistente) && produtoExistente.length > 0) {
-                await connection.end();
-                return res.status(409).json({ mensagem: 'Produto com este ID já existe.' });
-            }
-
+            // Inserção do novo produto no banco de dados
             await connection.query(
-                'INSERT INTO produtos (id, nome, descricao, preco, imagem, estoque) VALUES (?, ?, ?, ?, ?, ?)',
-                [id, nome, descricao, preco, imagem, estoque]
+                'INSERT INTO produtos (nome, descricao, preco, estoque, imagem) VALUES (?, ?, ?, ?, ?)',
+                [nome, descricao, preco, estoque, imagem]
             );
-            await connection.end();
 
+            await connection.end(); // Fecha a conexão com o banco
             res.status(201).json({ mensagem: 'Produto cadastrado com sucesso!' });
-        } catch (e: unknown) {
-            const error = e as Error;
-            console.error('Erro ao cadastrar produto:', error.message);
-            res.status(500).send('Erro ao cadastrar produto.');
+        } catch (error: unknown) {
+            const err = error as Error;
+            console.error('Erro ao cadastrar produto:', err.message);
+            res.status(500).json({ mensagem: 'Erro ao cadastrar produto.' });
         }
     }
 );
@@ -253,26 +245,53 @@ app.post(
 
             const senhaValida = bcrypt.compareSync(senha, usuario.senha);
             if (!senhaValida) {
-                return res.status(401).json({ mensagem: 'Credenciais inválidas' });
+                return res.status(400).json({ mensagem: 'Senha incorreta' });
             }
 
             const token = jwt.sign(
-                { id: usuario.id, nome: usuario.nome },
+                { id: usuario.codigoEmpresarial },
                 process.env.JWT_SECRET || 'default_secret',
-                { expiresIn: '8h' }
+                { expiresIn: '1h' }
             );
 
-            res.status(200).json({ token });
+            await connection.end();
+
+            res.send({ token });
         } catch (e: unknown) {
             const error = e as Error;
             console.error('Erro ao fazer login:', error.message);
-            res.status(500).send('Erro ao fazer login.');
+            res.status(500).send('Erro ao fazer login');
         }
     }
 );
 
-const PORT = process.env.PORT || 8000;
+// Rota para obter os dados do usuário
+app.get('/usuarios/dados', verificarToken, async (req: Request, res: Response) => {
+    try {
+        const connection = await createDbConnection();
+        const usuarioId = req.usuarioId; // Obtém o id do usuário do token
 
-app.listen(PORT, () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
+        const [usuarios] = await connection.query(
+            'SELECT nome, codigoEmpresarial FROM usuarios WHERE codigoEmpresarial = ?',
+            [usuarioId]
+        );
+
+        if ((usuarios as any[]).length === 0) {
+            return res.status(404).json({ mensagem: 'Usuário não encontrado' });
+        }
+
+        const usuario = (usuarios as any[])[0]; // Extrai os dados do usuário
+
+        await connection.end();
+        res.status(200).json(usuario); // Retorna os dados do usuário
+    } catch (error: unknown) {
+        const err = error as Error;
+        console.error('Erro ao carregar dados do usuário:', err.message);
+        res.status(500).json({ mensagem: 'Erro ao carregar dados do usuário' });
+    }
+});
+
+// Iniciar o servidor
+app.listen(8000, () => {
+    console.log('Servidor iniciado na porta 8000');
 });
