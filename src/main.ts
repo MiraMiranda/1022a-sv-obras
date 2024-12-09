@@ -128,15 +128,63 @@ app.get('/produtos', async (req: Request, res: Response) => {
     }
 });
 
-// Rota para criar um novo produto
+// Rota para cadastro de novo produto
 app.post(
     '/produtos',
-    upload.single('imagem'), // Caso queira permitir upload de imagens
     [
-        body('nome').isString().withMessage('O nome deve ser uma string.'),
-        body('descricao').isString().withMessage('A descrição deve ser uma string.'),
-        body('preco').isNumeric().withMessage('O preço deve ser um número.'),
-        body('estoque').isNumeric().withMessage('O estoque deve ser um número.'),
+        body('id').notEmpty().withMessage('O campo ID é obrigatório'),
+        body('nome').isString().withMessage('O nome deve ser uma string'),
+        body('descricao').isString().withMessage('A descrição deve ser uma string'),
+        body('preco').isNumeric().withMessage('O preço deve ser um número'),
+        body('imagem').isString().withMessage('O campo imagem deve ser uma string'),
+        body('estoque').isNumeric().withMessage('O estoque deve ser um número'),
+    ],
+    async (req: Request, res: Response) => {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
+        const { id, nome, descricao, preco, imagem, estoque } = req.body;
+
+        try {
+            const connection = await createDbConnection();
+
+            // Verifica se o produto já existe pelo ID
+            const [produtoExistente] = await connection.query(
+                'SELECT * FROM produtos WHERE id = ?',
+                [id]
+            );
+
+            if (Array.isArray(produtoExistente) && produtoExistente.length > 0) {
+                await connection.end();
+                return res.status(409).json({ mensagem: 'Produto com este ID já existe.' });
+            }
+
+            await connection.query(
+                'INSERT INTO produtos (id, nome, descricao, preco, imagem, estoque) VALUES (?, ?, ?, ?, ?, ?)',
+                [id, nome, descricao, preco, imagem, estoque]
+            );
+            await connection.end();
+
+            res.status(201).json({ mensagem: 'Produto cadastrado com sucesso!' });
+        } catch (e: unknown) {
+            const error = e as Error;
+            console.error('Erro ao cadastrar produto:', error.message);
+            res.status(500).send('Erro ao cadastrar produto.');
+        }
+    }
+);
+
+// Rota para cadastro de novo usuário com upload de imagem
+app.post(
+    '/cadastro',
+    upload.single('imagem'),
+    [
+        body('nome').isString().withMessage('Nome deve ser uma string'),
+        body('cpf').isString().withMessage('CPF deve ser uma string'),
+        body('codigoEmpresarial').isString().withMessage('Código Empresarial deve ser uma string'),
+        body('senha').isLength({ min: 6 }).withMessage('Senha deve ter no mínimo 6 caracteres'),
     ],
     async (req: Request, res: Response) => {
         const errors = validationResult(req);
@@ -146,27 +194,85 @@ app.post(
 
         try {
             const connection = await createDbConnection();
-            const { nome, descricao, preco, estoque } = req.body;
-            const imagem = req.file ? req.file.buffer : null; // Se o upload de imagem for usado
+            const { nome, cpf, codigoEmpresarial, senha } = req.body;
+
+            const [existeCodigo] = await connection.query(
+                'SELECT * FROM usuarios WHERE codigoEmpresarial = ?',
+                [codigoEmpresarial]
+            );
+
+            if (Array.isArray(existeCodigo) && existeCodigo.length > 0) {
+                return res.status(400).send('Código empresarial já registrado.');
+            }
+
+            const senhaHash = bcrypt.hashSync(senha, 10);
+            const imagem = req.file ? req.file.buffer : null;
 
             await connection.query(
-                'INSERT INTO produtos (nome, descricao, preco, imagem, estoque) VALUES (?, ?, ?, ?, ?)',
-                [nome, descricao, preco, imagem, estoque]
+                'INSERT INTO usuarios (nome, cpf, codigoEmpresarial, senha, imagem) VALUES (?, ?, ?, ?, ?)',
+                [nome, cpf, codigoEmpresarial, senhaHash, imagem]
             );
 
             await connection.end();
-            res.status(201).json({ mensagem: 'Produto cadastrado com sucesso!' });
+            res.send({ mensagem: 'Usuário cadastrado com sucesso!' });
         } catch (e: unknown) {
             const error = e as Error;
-            console.error('Erro ao cadastrar produto:', error.message);
-            res.status(500).json({ mensagem: 'Erro ao cadastrar produto.' });
+            console.error('Erro ao cadastrar usuário:', error.message);
+            res.status(500).send('Erro ao cadastrar usuário.');
         }
     }
 );
 
-// Resto do código (como rotas de usuários, login, etc.)
-// ...
-// Iniciar o servidor
-app.listen(8000, () => {
-    console.log('Servidor iniciado na porta 8000');
+// Rota de login para gerar o token JWT
+app.post(
+    '/usuarios/login',
+    [
+        body('codigoEmpresarial').isString().withMessage('Código Empresarial deve ser uma string'),
+        body('senha').isLength({ min: 6 }).withMessage('Senha deve ter no mínimo 6 caracteres'),
+    ],
+    async (req: Request, res: Response) => {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
+        try {
+            const connection = await createDbConnection();
+            const { codigoEmpresarial, senha } = req.body;
+
+            const [usuarios] = await connection.query(
+                'SELECT * FROM usuarios WHERE codigoEmpresarial = ?',
+                [codigoEmpresarial]
+            );
+
+            if ((usuarios as any[]).length === 0) {
+                return res.status(404).json({ mensagem: 'Usuário não encontrado' });
+            }
+
+            const usuario = (usuarios as any[])[0];
+
+            const senhaValida = bcrypt.compareSync(senha, usuario.senha);
+            if (!senhaValida) {
+                return res.status(401).json({ mensagem: 'Credenciais inválidas' });
+            }
+
+            const token = jwt.sign(
+                { id: usuario.id, nome: usuario.nome },
+                process.env.JWT_SECRET || 'default_secret',
+                { expiresIn: '8h' }
+            );
+
+            res.status(200).json({ token });
+        } catch (e: unknown) {
+            const error = e as Error;
+            console.error('Erro ao fazer login:', error.message);
+            res.status(500).send('Erro ao fazer login.');
+        }
+    }
+);
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
 });
