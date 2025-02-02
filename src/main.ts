@@ -294,6 +294,50 @@ app.get('/usuarios/dados', verificarToken, async (req: Request, res: Response) =
     }
 });
 
+
+// Rota para alterar um produto existente
+app.put('/produtos/:id', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { nome, descricao, preco, estoque, imagem } = req.body;
+
+        const [resultado] = await connection.query(
+            'UPDATE produtos SET nome = ?, descricao = ?, preco = ?, estoque = ?, imagem = ? WHERE id = ?',
+            [nome, descricao, preco, estoque, imagem, id]
+        );
+
+        if ((resultado as any).affectedRows > 0) {
+            res.status(200).json({ mensagem: 'Produto atualizado com sucesso!' });
+        } else {
+            res.status(404).json({ mensagem: 'Produto não encontrado.' });
+        }
+    } catch (error) {
+        console.error('Erro ao atualizar produto:', (error as Error).message);
+        res.status(500).json({ mensagem: 'Erro ao atualizar produto.' });
+    }
+});
+
+// Rota para excluir um produto
+app.delete('/produtos/:id', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+
+        const [resultado] = await connection.query(
+            'DELETE FROM produtos WHERE id = ?',
+            [id]
+        );
+
+        if ((resultado as any).affectedRows > 0) {
+            res.status(200).json({ mensagem: 'Produto excluído com sucesso!' });
+        } else {
+            res.status(404).json({ mensagem: 'Produto não encontrado.' });
+        }
+    } catch (error) {
+        console.error('Erro ao excluir produto:', (error as Error).message);
+        res.status(500).json({ mensagem: 'Erro ao excluir produto.' });
+    }
+});
+
 // Iniciar o servidor
 app.listen(8000, () => {
     console.log('Servidor iniciado na porta 8000');
